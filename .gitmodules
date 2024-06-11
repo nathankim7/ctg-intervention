@@ -1,0 +1,3 @@
+[submodule "pyvene"]
+	path = pyvene
+	url = https://github.com/stanfordnlp/pyvene.git
