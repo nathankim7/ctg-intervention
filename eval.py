@@ -10,6 +10,9 @@ import pyvene as pv
 import tqdm
 import csv
 import pickle
+from typing import Optional
+
+from pyvene.models.intervenable_base import TIMESTEP_SELECTOR_TYPE
 
 load_dotenv("./.env")
 with open("Evaluation prompts.yaml", "r") as f:
@@ -24,6 +27,10 @@ FEATURE_STRINGS = {
     "Twist": "something unexpected happens / there is a plot twist",
     "Foreshadowing": "the narrative uses foreshadowing or setup and payoff",
 }
+
+SEED = 0
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
 
 
 def construct_story_explanation(story, words, features):
@@ -41,13 +48,14 @@ def run_intervention_eval(
     run_name: str,
     num_examples=1000,
     source_representations=None,
+    timestep_selector: Optional[list[TIMESTEP_SELECTOR_TYPE]] = None,
 ):
     ds = load_dataset("parquet", data_files="./TinyStories5.parquet")["train"]
     ds = ds.filter(
-        lambda e: "BadEnding" in e["instruction.features"]
-        or "MoralValue" in e["instruction.features"]
+        lambda e: 'BadEnding' in e["instruction.features"]
+        or 'MoralValue' in e["instruction.features"]
     )
-    f = open(f"{run_name}.csv", "w+", newline="")
+    f = open(f"./results/{run_name}.csv", "w+", newline="")
     f.write("id,story,assessment,features,grammar,creativity,consistency,score\n")
     writer = csv.writer(f, doublequote=False, escapechar="\\")
     grammars = 0
@@ -71,7 +79,7 @@ def run_intervention_eval(
                 source_representations=reps,
                 intervene_on_prompt=True,
                 unit_locations={"base": (0, 1)},
-                timestep_selector=[lambda i, o: i % 10 == 5 for x in range(3)],
+                timestep_selector=timestep_selector,
                 output_original_output=True,
                 do_sample=True,
                 max_length=500,
@@ -106,7 +114,7 @@ from possible age groups: A: 3 or under. B: 4-5. C: 6-7. D: 8-9. E: 10-12. F: 13
                     i,
                     story.replace("\n", "\\n"),
                     eval_stream["assessment"].replace("\n", "\\n"),
-                    '+'.join(features),
+                    "+".join(features),
                     eval_stream["grammar"],
                     eval_stream["creativity"],
                     eval_stream["consistency"],
@@ -127,7 +135,7 @@ from possible age groups: A: 3 or under. B: 4-5. C: 6-7. D: 8-9. E: 10-12. F: 13
 if __name__ == "__main__":
     with open("happysad.pkl", "rb") as f:
         happysad = pickle.load(f)
-    
+
     MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.2"
     GPU_ID = 0
     lm = models.Transformers(
@@ -153,10 +161,31 @@ if __name__ == "__main__":
             for l in [2, 3]
         ],
         model=tinystory,
+        use_token_state=True
     )
     pv_model.set_device(f"cuda")
     print(pv_model.model.device)
 
+    target_set = [
+        "She",
+        "He",
+        "They",
+        "ĠShe",
+        "ĠHe",
+        "ĠThey",
+        "Ġshe",
+        "Ġhe",
+        "Ġthey",
+        # "ĠI",
+        # "ĠYou",
+        # "Ġyou",
+    ]
+    id_set = tokenizer.convert_tokens_to_ids(target_set)
+
     run_intervention_eval(
-        lm, "actadd_every5", num_examples=1000, source_representations=happysad
+        lm,
+        "actadd_pronouns_c1_2",
+        num_examples=1000,
+        source_representations=happysad,
+        timestep_selector=[lambda i, o, t: t in id_set for x in range(2)],
     )
